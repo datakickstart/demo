@@ -1,0 +1,430 @@
+{
+  "datasets": [
+    {
+      "name": "kpi_summary",
+      "displayName": "KPI Summary",
+      "queryLines": [
+        "SELECT ",
+        "  ROUND(SUM(CAST(total_amount AS DOUBLE)), 2) AS total_revenue, ",
+        "  COUNT(DISTINCT order_id) AS total_orders, ",
+        "  COUNT(DISTINCT customer_id) AS active_customers, ",
+        "  ROUND(AVG(CAST(total_amount AS DOUBLE)), 2) AS avg_order_value, ",
+        "  ROUND(SUM(CASE WHEN status = 'Cancelled' THEN 1.0 ELSE 0.0 END) * 100.0 / COUNT(*), 1) AS cancellation_rate_pct, ",
+        "  ROUND(SUM(CASE WHEN status = 'Delivered' THEN CAST(total_amount AS DOUBLE) ELSE 0 END), 2) AS realized_revenue, ",
+        "  ROUND(SUM(CASE WHEN status IN ('Cancelled','Returned') THEN CAST(total_amount AS DOUBLE) ELSE 0 END), 2) AS at_risk_revenue ",
+        "FROM orders_current "
+      ]
+    },
+    {
+      "name": "daily_trend",
+      "displayName": "Daily Revenue Trend",
+      "queryLines": [
+        "SELECT ",
+        "  order_date, ",
+        "  CAST(total_revenue AS DOUBLE) AS total_revenue, ",
+        "  CAST(realized_revenue AS DOUBLE) AS realized_revenue, ",
+        "  CAST(pipeline_revenue AS DOUBLE) AS pipeline_revenue, ",
+        "  CAST(at_risk_revenue AS DOUBLE) AS at_risk_revenue, ",
+        "  total_orders ",
+        "FROM daily_sales_summary ",
+        "ORDER BY order_date "
+      ]
+    },
+    {
+      "name": "monthly_breakdown",
+      "displayName": "Monthly Breakdown",
+      "queryLines": [
+        "SELECT ",
+        "  DATE_TRUNC('MONTH', order_date) AS month, ",
+        "  ROUND(SUM(CAST(total_revenue AS DOUBLE)), 2) AS monthly_revenue, ",
+        "  SUM(total_orders) AS monthly_orders, ",
+        "  ROUND(SUM(CAST(realized_revenue AS DOUBLE)), 2) AS monthly_realized, ",
+        "  ROUND(SUM(CAST(at_risk_revenue AS DOUBLE)), 2) AS monthly_at_risk, ",
+        "  ROUND(SUM(CAST(pipeline_revenue AS DOUBLE)), 2) AS monthly_pipeline ",
+        "FROM daily_sales_summary ",
+        "GROUP BY DATE_TRUNC('MONTH', order_date) ",
+        "ORDER BY month "
+      ]
+    },
+    {
+      "name": "by_status",
+      "displayName": "Revenue by Status",
+      "queryLines": [
+        "SELECT ",
+        "  status, ",
+        "  COUNT(*) AS order_count, ",
+        "  ROUND(SUM(CAST(total_amount AS DOUBLE)), 2) AS revenue ",
+        "FROM orders_current ",
+        "GROUP BY status ",
+        "ORDER BY revenue DESC "
+      ]
+    },
+    {
+      "name": "membership_data",
+      "displayName": "Membership Metrics",
+      "queryLines": [
+        "SELECT ",
+        "  membership_level, ",
+        "  total_customers, ",
+        "  total_orders, ",
+        "  orders_per_customer, ",
+        "  CAST(total_revenue AS DOUBLE) AS total_revenue, ",
+        "  CAST(avg_ltv_per_customer AS DOUBLE) AS avg_ltv_per_customer, ",
+        "  CAST(cancellation_rate_pct AS DOUBLE) AS cancellation_rate_pct, ",
+        "  avg_items_per_order ",
+        "FROM membership_metrics ",
+        "ORDER BY membership_tier_rank "
+      ]
+    },
+    {
+      "name": "top_products",
+      "displayName": "Top Products",
+      "queryLines": [
+        "SELECT ",
+        "  product_name, ",
+        "  SUM(quantity) AS total_quantity, ",
+        "  ROUND(SUM(CAST(line_total AS DOUBLE)), 2) AS total_revenue, ",
+        "  COUNT(DISTINCT order_id) AS order_count ",
+        "FROM line_items_current ",
+        "GROUP BY product_name ",
+        "ORDER BY total_revenue DESC ",
+        "LIMIT 10 "
+      ]
+    },
+    {
+      "name": "by_region",
+      "displayName": "Customers by Region",
+      "queryLines": [
+        "SELECT ",
+        "  region, ",
+        "  COUNT(*) AS customer_count ",
+        "FROM dim_customers ",
+        "WHERE __END_AT IS NULL ",
+        "GROUP BY region ",
+        "ORDER BY customer_count DESC "
+      ]
+    },
+    {
+      "name": "order_tiers",
+      "displayName": "Order Value Tiers",
+      "queryLines": [
+        "SELECT ",
+        "  order_value_tier, ",
+        "  COUNT(*) AS order_count, ",
+        "  ROUND(SUM(CAST(total_amount AS DOUBLE)), 2) AS revenue ",
+        "FROM orders_current ",
+        "GROUP BY order_value_tier ",
+        "ORDER BY order_count DESC "
+      ]
+    },
+    {
+      "name": "revenue_forecast",
+      "displayName": "Revenue Forecast",
+      "queryLines": [
+        "WITH monthly AS ( ",
+        "  SELECT ",
+        "    DATE_TRUNC('MONTH', order_date) AS month, ",
+        "    ROUND(SUM(CAST(total_revenue AS DOUBLE)), 2) AS revenue ",
+        "  FROM daily_sales_summary ",
+        "  WHERE order_date < DATE_TRUNC('MONTH', current_date()) ",
+        "  GROUP BY DATE_TRUNC('MONTH', order_date) ",
+        "), ",
+        "monthly_with_lag AS ( ",
+        "  SELECT month, revenue, LAG(revenue) OVER (ORDER BY month) AS prev_revenue ",
+        "  FROM monthly ",
+        "), ",
+        "recent_growth AS ( ",
+        "  SELECT ",
+        "    AVG((revenue - prev_revenue) / NULLIF(prev_revenue, 0)) AS avg_growth_rate, ",
+        "    MAX(month) AS last_month, ",
+        "    AVG(revenue) AS avg_revenue ",
+        "  FROM monthly_with_lag ",
+        "  WHERE prev_revenue IS NOT NULL ",
+        "    AND month >= add_months((SELECT MAX(month) FROM monthly), -4) ",
+        ") ",
+        "SELECT month, revenue, 'Actual' AS series_type FROM monthly ",
+        "UNION ALL ",
+        "SELECT add_months(last_month, 1), ROUND(avg_revenue * (1 + avg_growth_rate), 2), 'Forecast' FROM recent_growth ",
+        "UNION ALL ",
+        "SELECT add_months(last_month, 2), ROUND(avg_revenue * POWER(1 + avg_growth_rate, 2), 2), 'Forecast' FROM recent_growth ",
+        "UNION ALL ",
+        "SELECT add_months(last_month, 3), ROUND(avg_revenue * POWER(1 + avg_growth_rate, 3), 2), 'Forecast' FROM recent_growth ",
+        "ORDER BY month "
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "executive_overview",
+      "displayName": "Executive Overview",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "overview-title",
+            "multilineTextboxSpec": { "lines": ["## Retail Executive Dashboard"] }
+          },
+          "position": { "x": 0, "y": 0, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "overview-subtitle",
+            "multilineTextboxSpec": { "lines": ["Key performance metrics for CEO and CFO | Source: gold layer"] }
+          },
+          "position": { "x": 0, "y": 1, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "kpi-total-revenue",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "total_revenue", "expression": "`total_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "total_revenue", "displayName": "Total Revenue ($)"}}, "frame": {"showTitle": true, "title": "Total Revenue"}}
+          },
+          "position": { "x": 0, "y": 2, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "kpi-total-orders",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "total_orders", "expression": "`total_orders`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "total_orders", "displayName": "Total Orders"}}, "frame": {"showTitle": true, "title": "Total Orders"}}
+          },
+          "position": { "x": 2, "y": 2, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "kpi-active-customers",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "active_customers", "expression": "`active_customers`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "active_customers", "displayName": "Active Customers"}}, "frame": {"showTitle": true, "title": "Active Customers"}}
+          },
+          "position": { "x": 4, "y": 2, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "kpi-avg-order",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "avg_order_value", "expression": "`avg_order_value`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "avg_order_value", "displayName": "Avg Order Value ($)"}}, "frame": {"showTitle": true, "title": "Avg Order Value"}}
+          },
+          "position": { "x": 0, "y": 5, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "kpi-realized-revenue",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "realized_revenue", "expression": "`realized_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "realized_revenue", "displayName": "Realized Revenue ($)"}}, "frame": {"showTitle": true, "title": "Realized Revenue"}}
+          },
+          "position": { "x": 2, "y": 5, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "kpi-cancellation-rate",
+            "queries": [{"name": "main_query", "query": {"datasetName": "kpi_summary", "fields": [{"name": "cancellation_rate_pct", "expression": "`cancellation_rate_pct`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "counter", "encodings": {"value": {"fieldName": "cancellation_rate_pct", "displayName": "Cancellation Rate (%)"}}, "frame": {"showTitle": true, "title": "Cancellation Rate (%)"}}
+          },
+          "position": { "x": 4, "y": 5, "width": 2, "height": 3 }
+        },
+        {
+          "widget": {
+            "name": "trend-header",
+            "multilineTextboxSpec": { "lines": ["### Daily Revenue Trend"] }
+          },
+          "position": { "x": 0, "y": 8, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "daily-revenue-line",
+            "queries": [{"name": "main_query", "query": {"datasetName": "daily_trend", "fields": [{"name": "order_date", "expression": "`order_date`"}, {"name": "realized_revenue", "expression": "`realized_revenue`"}, {"name": "pipeline_revenue", "expression": "`pipeline_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "line", "encodings": {"x": {"fieldName": "order_date", "scale": {"type": "temporal"}, "displayName": "Date"}, "y": {"scale": {"type": "quantitative"}, "fields": [{"fieldName": "realized_revenue", "displayName": "Realized Revenue"}, {"fieldName": "pipeline_revenue", "displayName": "Pipeline Revenue"}]}}, "frame": {"showTitle": true, "title": "Daily Realized vs Pipeline Revenue"}}
+          },
+          "position": { "x": 0, "y": 9, "width": 6, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "monthly-header",
+            "multilineTextboxSpec": { "lines": ["### Monthly Revenue & Order Status"] }
+          },
+          "position": { "x": 0, "y": 15, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "monthly-revenue-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "monthly_breakdown", "fields": [{"name": "month", "expression": "`month`"}, {"name": "monthly_revenue", "expression": "`monthly_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "Month"}, "y": {"fieldName": "monthly_revenue", "scale": {"type": "quantitative"}, "displayName": "Revenue ($)"}}, "frame": {"showTitle": true, "title": "Monthly Revenue"}}
+          },
+          "position": { "x": 0, "y": 16, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "status-pie",
+            "queries": [{"name": "main_query", "query": {"datasetName": "by_status", "fields": [{"name": "status", "expression": "`status`"}, {"name": "revenue", "expression": "`revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "pie", "encodings": {"angle": {"fieldName": "revenue", "scale": {"type": "quantitative"}, "displayName": "Revenue"}, "color": {"fieldName": "status", "scale": {"type": "categorical"}, "displayName": "Status"}}, "frame": {"showTitle": true, "title": "Revenue by Order Status"}}
+          },
+          "position": { "x": 3, "y": 16, "width": 3, "height": 5 }
+        }
+      ]
+    },
+    {
+      "name": "customer_membership",
+      "displayName": "Customer & Membership",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "membership-title",
+            "multilineTextboxSpec": { "lines": ["## Customer & Membership Analytics"] }
+          },
+          "position": { "x": 0, "y": 0, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "revenue-by-tier",
+            "queries": [{"name": "main_query", "query": {"datasetName": "membership_data", "fields": [{"name": "membership_level", "expression": "`membership_level`"}, {"name": "total_revenue", "expression": "`total_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "membership_level", "scale": {"type": "categorical"}, "displayName": "Tier"}, "y": {"fieldName": "total_revenue", "scale": {"type": "quantitative"}, "displayName": "Total Revenue ($)"}}, "frame": {"showTitle": true, "title": "Total Revenue by Membership Tier"}}
+          },
+          "position": { "x": 0, "y": 1, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "ltv-by-tier",
+            "queries": [{"name": "main_query", "query": {"datasetName": "membership_data", "fields": [{"name": "membership_level", "expression": "`membership_level`"}, {"name": "avg_ltv_per_customer", "expression": "`avg_ltv_per_customer`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "membership_level", "scale": {"type": "categorical"}, "displayName": "Tier"}, "y": {"fieldName": "avg_ltv_per_customer", "scale": {"type": "quantitative"}, "displayName": "Avg LTV ($)"}}, "frame": {"showTitle": true, "title": "Average LTV per Customer by Tier"}}
+          },
+          "position": { "x": 3, "y": 1, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "customer-insights-header",
+            "multilineTextboxSpec": { "lines": ["### Customer Insights"] }
+          },
+          "position": { "x": 0, "y": 6, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "region-pie",
+            "queries": [{"name": "main_query", "query": {"datasetName": "by_region", "fields": [{"name": "region", "expression": "`region`"}, {"name": "customer_count", "expression": "`customer_count`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "pie", "encodings": {"angle": {"fieldName": "customer_count", "scale": {"type": "quantitative"}, "displayName": "Customers"}, "color": {"fieldName": "region", "scale": {"type": "categorical"}, "displayName": "Region"}}, "frame": {"showTitle": true, "title": "Customer Distribution by Region"}}
+          },
+          "position": { "x": 0, "y": 7, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "orders-per-customer",
+            "queries": [{"name": "main_query", "query": {"datasetName": "membership_data", "fields": [{"name": "membership_level", "expression": "`membership_level`"}, {"name": "orders_per_customer", "expression": "`orders_per_customer`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "membership_level", "scale": {"type": "categorical"}, "displayName": "Tier"}, "y": {"fieldName": "orders_per_customer", "scale": {"type": "quantitative"}, "displayName": "Orders per Customer"}}, "frame": {"showTitle": true, "title": "Orders per Customer by Tier"}}
+          },
+          "position": { "x": 3, "y": 7, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "membership-table-header",
+            "multilineTextboxSpec": { "lines": ["### Membership Metrics Detail"] }
+          },
+          "position": { "x": 0, "y": 12, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "membership-table",
+            "queries": [{"name": "main_query", "query": {"datasetName": "membership_data", "fields": [{"name": "membership_level", "expression": "`membership_level`"}, {"name": "total_customers", "expression": "`total_customers`"}, {"name": "total_orders", "expression": "`total_orders`"}, {"name": "orders_per_customer", "expression": "`orders_per_customer`"}, {"name": "total_revenue", "expression": "`total_revenue`"}, {"name": "avg_ltv_per_customer", "expression": "`avg_ltv_per_customer`"}, {"name": "cancellation_rate_pct", "expression": "`cancellation_rate_pct`"}, {"name": "avg_items_per_order", "expression": "`avg_items_per_order`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "table", "encodings": {"columns": [{"fieldName": "membership_level", "displayName": "Tier"}, {"fieldName": "total_customers", "displayName": "Customers"}, {"fieldName": "total_orders", "displayName": "Total Orders"}, {"fieldName": "orders_per_customer", "displayName": "Orders/Customer"}, {"fieldName": "total_revenue", "displayName": "Total Revenue ($)"}, {"fieldName": "avg_ltv_per_customer", "displayName": "Avg LTV ($)"}, {"fieldName": "cancellation_rate_pct", "displayName": "Cancel Rate (%)"}, {"fieldName": "avg_items_per_order", "displayName": "Items/Order"}]}, "frame": {"showTitle": true, "title": "Full Membership Metrics"}}
+          },
+          "position": { "x": 0, "y": 13, "width": 6, "height": 6 }
+        }
+      ]
+    },
+    {
+      "name": "product_operations",
+      "displayName": "Product & Operations",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "ops-title",
+            "multilineTextboxSpec": { "lines": ["## Product & Operations Analytics"] }
+          },
+          "position": { "x": 0, "y": 0, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "top-products-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "top_products", "fields": [{"name": "product_name", "expression": "`product_name`"}, {"name": "total_revenue", "expression": "`total_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "product_name", "scale": {"type": "categorical"}, "displayName": "Product"}, "y": {"fieldName": "total_revenue", "scale": {"type": "quantitative"}, "displayName": "Revenue ($)"}}, "frame": {"showTitle": true, "title": "Top 10 Products by Revenue"}}
+          },
+          "position": { "x": 0, "y": 1, "width": 6, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "pipeline-header",
+            "multilineTextboxSpec": { "lines": ["### Monthly Revenue Pipeline"] }
+          },
+          "position": { "x": 0, "y": 7, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "monthly-breakdown-line",
+            "queries": [{"name": "main_query", "query": {"datasetName": "monthly_breakdown", "fields": [{"name": "month", "expression": "`month`"}, {"name": "monthly_realized", "expression": "`monthly_realized`"}, {"name": "monthly_pipeline", "expression": "`monthly_pipeline`"}, {"name": "monthly_at_risk", "expression": "`monthly_at_risk`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "line", "encodings": {"x": {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "Month"}, "y": {"scale": {"type": "quantitative"}, "fields": [{"fieldName": "monthly_realized", "displayName": "Realized"}, {"fieldName": "monthly_pipeline", "displayName": "Pipeline"}, {"fieldName": "monthly_at_risk", "displayName": "At-Risk"}]}}, "frame": {"showTitle": true, "title": "Monthly Revenue: Realized vs Pipeline vs At-Risk"}}
+          },
+          "position": { "x": 0, "y": 8, "width": 6, "height": 6 }
+        },
+        {
+          "widget": {
+            "name": "order-size-header",
+            "multilineTextboxSpec": { "lines": ["### Order Value Segments"] }
+          },
+          "position": { "x": 0, "y": 14, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "order-tier-bar",
+            "queries": [{"name": "main_query", "query": {"datasetName": "order_tiers", "fields": [{"name": "order_value_tier", "expression": "`order_value_tier`"}, {"name": "order_count", "expression": "`order_count`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "bar", "encodings": {"x": {"fieldName": "order_value_tier", "scale": {"type": "categorical"}, "displayName": "Order Tier"}, "y": {"fieldName": "order_count", "scale": {"type": "quantitative"}, "displayName": "Order Count"}}, "frame": {"showTitle": true, "title": "Order Count by Value Segment"}}
+          },
+          "position": { "x": 0, "y": 15, "width": 3, "height": 5 }
+        },
+        {
+          "widget": {
+            "name": "top-products-table",
+            "queries": [{"name": "main_query", "query": {"datasetName": "top_products", "fields": [{"name": "product_name", "expression": "`product_name`"}, {"name": "order_count", "expression": "`order_count`"}, {"name": "total_quantity", "expression": "`total_quantity`"}, {"name": "total_revenue", "expression": "`total_revenue`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "table", "encodings": {"columns": [{"fieldName": "product_name", "displayName": "Product"}, {"fieldName": "order_count", "displayName": "Orders"}, {"fieldName": "total_quantity", "displayName": "Units Sold"}, {"fieldName": "total_revenue", "displayName": "Revenue ($)"}]}, "frame": {"showTitle": true, "title": "Top 10 Products Detail"}}
+          },
+          "position": { "x": 3, "y": 15, "width": 3, "height": 5 }
+        }
+      ]
+    },
+    {
+      "name": "revenue_forecast_page",
+      "displayName": "Revenue Forecast",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "forecast-title",
+            "multilineTextboxSpec": { "lines": ["## Revenue Forecast"] }
+          },
+          "position": { "x": 0, "y": 0, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "forecast-subtitle",
+            "multilineTextboxSpec": { "lines": ["3-month projection based on recent average monthly growth rate | Actuals exclude current partial month"] }
+          },
+          "position": { "x": 0, "y": 1, "width": 6, "height": 1 }
+        },
+        {
+          "widget": {
+            "name": "forecast-line",
+            "queries": [{"name": "main_query", "query": {"datasetName": "revenue_forecast", "fields": [{"name": "month", "expression": "`month`"}, {"name": "revenue", "expression": "`revenue`"}, {"name": "series_type", "expression": "`series_type`"}], "disaggregated": true}}],
+            "spec": {"version": 3, "widgetType": "line", "encodings": {"x": {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "Month"}, "y": {"fieldName": "revenue", "scale": {"type": "quantitative"}, "displayName": "Revenue ($)"}, "color": {"fieldName": "series_type", "scale": {"type": "categorical"}, "displayName": "Series"}}, "frame": {"showTitle": true, "title": "Monthly Revenue: Actual vs Forecast"}}
+          },
+          "position": { "x": 0, "y": 2, "width": 6, "height": 7 }
+        },
+        {
+          "widget": {
+            "name": "forecast-table",
+            "queries": [{"name": "main_query", "query": {"datasetName": "revenue_forecast", "fields": [{"name": "month", "expression": "`month`"}, {"name": "revenue", "expression": "`revenue`"}, {"name": "series_type", "expression": "`series_type`"}], "disaggregated": true}}],
+            "spec": {"version": 2, "widgetType": "table", "encodings": {"columns": [{"fieldName": "month", "displayName": "Month"}, {"fieldName": "revenue", "displayName": "Revenue ($)"}, {"fieldName": "series_type", "displayName": "Type"}]}, "frame": {"showTitle": true, "title": "Monthly Revenue Data (Actuals + Forecast)"}}
+          },
+          "position": { "x": 0, "y": 9, "width": 6, "height": 6 }
+        }
+      ]
+    }
+  ]
+}

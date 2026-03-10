@@ -1,0 +1,73 @@
+bundle:
+  name: retail_dw
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: "Unity Catalog name for all pipeline schemas and the dashboard"
+    default: "main"
+  raw_schema:
+    description: "Schema containing the raw data volume (input to bronze)"
+    default: "demo_dw_raw"
+  bronze_schema:
+    description: "Schema for bronze (raw ingestion) streaming tables"
+    default: "bronze_retail_dev"
+  silver_schema:
+    description: "Schema for silver (cleaned & enriched) streaming tables"
+    default: "silver_retail_dev"
+  gold_schema:
+    description: "Schema for gold (business-ready) fact/dimension tables and aggregates"
+    default: "gold_retail_dev"
+  warehouse_id:
+    description: "SQL warehouse ID used by the dashboard"
+    lookup:
+      warehouse: "datakickstart_xs"
+
+targets:
+  dev:
+    default: true
+    mode: development
+    workspace:
+      profile: DEFAULT
+    variables:
+      catalog: main
+      raw_schema: demo_dw_raw
+      bronze_schema: bronze_retail_dev
+      silver_schema: silver_retail_dev
+      gold_schema: gold_retail_dev
+    resources:
+      pipelines:
+        retail_dw_pipeline:
+          development: true
+
+  staging:
+    mode: development
+    workspace:
+      profile: DEFAULT
+    variables:
+      catalog: main
+      raw_schema: retail_raw_staging
+      bronze_schema: bronze_retail_staging
+      silver_schema: silver_retail_staging
+      gold_schema: gold_retail_staging
+    resources:
+      pipelines:
+        retail_dw_pipeline:
+          development: true
+
+  prod:
+    mode: production
+    workspace:
+      profile: prod
+    variables:
+      catalog: prod
+      raw_schema: retail_raw
+      bronze_schema: bronze_retail
+      silver_schema: silver_retail
+      gold_schema: gold_retail
+    resources:
+      pipelines:
+        retail_dw_pipeline:
+          development: false

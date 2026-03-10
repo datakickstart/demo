@@ -1,0 +1,29 @@
+resources:
+  jobs:
+    data_generation:
+      name: "[${bundle.target}] Retail Data Generation"
+
+      tasks:
+        - task_key: generate_data
+          environment_key: serverless_env
+          spark_python_task:
+            python_file: ../src/jobs/generate_retail_data.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema"
+              - "${var.raw_schema}"
+
+      # Serverless compute with managed library dependencies
+      environments:
+        - environment_key: serverless_env
+          spec:
+            client: "4"
+            dependencies:
+              - "faker>=18.0.0"
+              - "numpy"
+              - "pandas"
+
+      permissions:
+        - level: CAN_VIEW
+          group_name: "users"
