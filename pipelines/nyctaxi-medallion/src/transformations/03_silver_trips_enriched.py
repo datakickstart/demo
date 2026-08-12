@@ -12,6 +12,10 @@ Data quality:
   * DROP (Lakeflow expectations) — non-positive fare_amount or trip_distance.
   * FLAG (plain derived column, NOT an expectation) — is_invalid_time_order for
     rows where dropoff precedes pickup. These rows are kept.
+
+Because the expectations and this projection are one query, any expression that
+could fault on a row the expectation is about to drop must be null-safe — hence
+try_divide for fare_per_mile.
 """
 
 from pyspark import pipelines as dp
@@ -40,6 +44,9 @@ def borough_of(zip_col):
         .when(zip_col.between(11690, 11697), F.lit("Queens"))
         .when(zip_col.between(11501, 11599), F.lit("Long Island"))
         .when(zip_col.between(11701, 11980), F.lit("Long Island"))
+        # Westchester (Yonkers, Mount Vernon, New Rochelle, White Plains, Pelham) —
+        # the only non-NYC destinations that actually occur in this dataset.
+        .when(zip_col.between(10500, 10999), F.lit("Westchester"))
         .when(zip_col.between(6000, 6999), F.lit("Connecticut"))
         .when(zip_col.between(7000, 8999), F.lit("New Jersey"))
         .otherwise(F.lit("Unknown"))
@@ -82,11 +89,34 @@ def silver_trips_enriched():
             "trip_duration_minutes",
             F.round((dropoff.cast("long") - pickup.cast("long")) / 60.0, 3),
         )
-        .withColumn("fare_per_mile", F.round(F.col("fare_amount") / F.col("trip_distance"), 4))
+        # try_divide, not `/`: the positive_trip_distance expectation below and this
+        # projection are part of the same query, so a trip_distance == 0 row can be
+        # divided before the expectation drops it. Under ANSI mode the raw `/`
+        # operator would raise DIVIDE_BY_ZERO and fail the whole update;
+        # try_divide returns NULL instead, so the result is correct regardless of
+        # the order the optimizer picks.
+        .withColumn(
+            "fare_per_mile",
+            F.round(F.try_divide(F.col("fare_amount"), F.col("trip_distance")), 4),
+        )
         .withColumn("pickup_borough", pickup_borough)
         .withColumn("dropoff_borough", dropoff_borough)
-        # Cross-borough proxy: ZIP-range-derived borough differs end to end.
-        .withColumn("is_cross_borough", pickup_borough != dropoff_borough)
+        # Is the ZIP-range proxy able to place BOTH ends of the trip at all?
+        .withColumn(
+            "is_region_known",
+            (pickup_borough != F.lit("Unknown")) & (dropoff_borough != F.lit("Unknown")),
+        )
+        # Cross-borough proxy: ZIP-range-derived region differs end to end.
+        # NULL (not false) when either end is Unknown — an unplaceable ZIP is an
+        # unknown answer, not a same-borough trip. 'Unknown' != 'Unknown' would
+        # otherwise read as a confident "not cross-borough".
+        .withColumn(
+            "is_cross_borough",
+            F.when(
+                (pickup_borough == F.lit("Unknown")) | (dropoff_borough == F.lit("Unknown")),
+                F.lit(None).cast("boolean"),
+            ).otherwise(pickup_borough != dropoff_borough),
+        )
         .withColumn("time_of_day", TIME_OF_DAY_BUCKETS)
         # FLAG, not a drop rule: dropoff before pickup.
         .withColumn("is_invalid_time_order", dropoff < pickup)
@@ -119,6 +149,7 @@ def silver_trips_enriched():
             "trip_duration_minutes",
             "fare_per_mile",
             "is_cross_borough",
+            "is_region_known",
             "is_invalid_time_order",
             "_ingested_at",
         )

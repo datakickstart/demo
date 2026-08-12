@@ -41,7 +41,8 @@ databricks bundle run nyctaxi_medallion_etl -t dev --profile DEFAULT
 Every surrogate key and every synthetic value is a pure function of a natural key:
 
 - `trip_key` = `sha2(pickup_ts|dropoff_ts|distance|fare|pickup_zip|dropoff_zip, 256)` — unique
-  across all 21,932 source rows (verified).
+  across all 21,932 rows of this dataset snapshot (verified empirically, not guaranteed by
+  construction: two genuinely identical trips would collide).
 - `rider_id` = `RDR-` + `lpad(pmod(xxhash64(trip_key), 500), 5, '0')`.
 - Gold surrogate keys = `xxhash64(<natural key>)`; never `monotonically_increasing_id()`.
 - Synthetic rider PII = `xxhash64(row ordinal, <per-column salt>)` indexing fixed literal lists.

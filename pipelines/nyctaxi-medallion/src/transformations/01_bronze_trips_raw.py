@@ -30,9 +30,11 @@ def bronze_trips_raw():
         spark.readStream.table(SOURCE_TABLE)
         .withColumn("_ingested_at", F.current_timestamp())
         .withColumn("_source_table", F.lit(SOURCE_TABLE))
-        # Deterministic natural key: samples.nyctaxi.trips has no primary key, but
-        # the 6-column tuple is unique across all 21,932 rows (verified), so this
-        # hash is a stable trip identity across full refreshes and re-runs.
+        # Deterministic natural key: samples.nyctaxi.trips has no primary key. The
+        # 6-column tuple is unique across all 21,932 rows of this snapshot (verified
+        # empirically, NOT guaranteed by construction — two genuinely identical
+        # trips would collide), so this hash is a stable trip identity across full
+        # refreshes and re-runs.
         .withColumn(
             "trip_key",
             F.sha2(

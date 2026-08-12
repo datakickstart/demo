@@ -52,6 +52,9 @@ def gold_fact_trips():
         F.col("trip_duration_minutes"),
         F.col("fare_per_mile"),
         # Flags
+        # is_cross_borough is NULL when the ZIP-range proxy cannot place an end of
+        # the trip; is_region_known says whether the proxy applied at all.
         F.col("is_cross_borough"),
+        F.col("is_region_known"),
         F.col("is_invalid_time_order"),
     )
