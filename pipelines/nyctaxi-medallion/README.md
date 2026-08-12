@@ -36,6 +36,26 @@ databricks bundle deploy   -t dev --profile DEFAULT
 databricks bundle run nyctaxi_medallion_etl -t dev --profile DEFAULT
 ```
 
+## Metric view
+
+`resources/metric_views/trips_metrics.sql` defines the Unity Catalog metric view
+`main.nyctaxi_gold.trips_metrics` over `fact_trips` joined to all four dimensions
+(`dim_zone` twice, for pickup and dropoff). DABs has no native metric-view resource type,
+so it deploys as DDL:
+
+```bash
+./resources/metric_views/deploy.sh <WAREHOUSE_ID> DEFAULT
+```
+
+Query it with `MEASURE()` — `SELECT *` is not supported on metric views:
+
+```sql
+SELECT month, time_of_day, MEASURE(total_revenue), MEASURE(trip_count)
+FROM main.nyctaxi_gold.trips_metrics
+GROUP BY month, time_of_day, time_of_day_order
+ORDER BY month, time_of_day_order;
+```
+
 ## Determinism
 
 Every surrogate key and every synthetic value is a pure function of a natural key:
