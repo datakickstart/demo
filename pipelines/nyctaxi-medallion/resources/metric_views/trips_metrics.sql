@@ -24,14 +24,39 @@
 -- table -- the joins are many-to-one on surrogate keys, so the engine prunes any
 -- dimension a given query does not group by, and a single wide table would
 -- instead force every query to scan the widest possible row.
+-- * Every join carries `rely: {at_most_one_match: true}`. This is truthful, not
+--   decorative: each dimension's surrogate key is verified unique
+--   (COUNT(*) - COUNT(DISTINCT sk) = 0 on dim_date / dim_zone /
+--   dim_time_of_day / dim_rider), so each join really is at most 1:1 and the
+--   planner may skip the duplicate-match handling it would otherwise insert.
+--   The hint is UNENFORCED -- if a dimension ever gained a duplicate SK the
+--   results would be silently wrong, so that uniqueness check belongs in any
+--   future gold-layer test suite.
 -- * fact_trips is already liquid-clustered on (date_sk, pickup_zone_sk), the two
 --   highest-cardinality join keys this view groups by, so date- and pickup-zone
 --   filters get file skipping. The dimensions are small enough to broadcast.
 -- * Serverless SQL warehouses run Photon and cache results, so repeated
 --   dashboard reads of the same slice are served from cache.
+--
+-- MEASURED (warehouse 592a9f85708fccd4 `datakickstart_xs`, PRO serverless;
+-- durations from /api/2.0/sql/history/queries?include_metrics=true):
+--   month x time_of_day KPI query, 3 consecutive runs:
+--     total 1055 / 1073 / 1127 ms = compile 0.54-0.60 s + execute 0.46-0.48 s
+--     + fetch 0.04-0.07 s; 3 files / 1.38 MB read
+--   pickup_borough x pickup_zip slice (25 rows):  977 / 1049 ms (execute 0.38-0.41 s)
+--   rider_id slice (25 rows):                     885 /  970 ms (execute 0.34-0.41 s)
+--   `result_from_cache` was false on every run -- these are real executions.
+-- So execution is comfortably sub-second (~0.4 s), but end-to-end is ~1 s because
+-- roughly half of every run is metric-view/YAML query compilation -- a fixed cost
+-- that does not shrink with data volume.
+-- EXPLAIN on the KPI query confirms the pruning claim above: only 2 joins
+-- (dim_date, dim_time_of_day) appear in the physical plan -- pickup_zone,
+-- dropoff_zone and dim_rider are eliminated entirely -- and both survivors are
+-- PhotonBroadcastHashJoin, with zero SortMergeJoin / shuffle joins.
 -- * `materialization:` (experimental) would pre-compute chosen dimension/measure
 --   combinations via a hidden Lakeflow pipeline. Left OFF deliberately: at 21,847
---   fact rows the joins are already sub-second, and enabling it creates an extra
+--   fact rows execution is already ~0.4 s and the residual ~0.6 s is compilation,
+--   which materialization does not remove; it would also stand up an extra
 --   always-on pipeline to own and pay for. Enable it if this grows by orders of
 --   magnitude, e.g.:
 --     materialization:
@@ -55,18 +80,28 @@ joins:
   - name: dim_date
     source: main.nyctaxi_gold.dim_date
     on: source.date_sk = dim_date.date_sk
+    rely:
+      at_most_one_match: true
   - name: pickup_zone
     source: main.nyctaxi_gold.dim_zone
     on: source.pickup_zone_sk = pickup_zone.zone_sk
+    rely:
+      at_most_one_match: true
   - name: dropoff_zone
     source: main.nyctaxi_gold.dim_zone
     on: source.dropoff_zone_sk = dropoff_zone.zone_sk
+    rely:
+      at_most_one_match: true
   - name: dim_time_of_day
     source: main.nyctaxi_gold.dim_time_of_day
     on: source.time_of_day_sk = dim_time_of_day.time_of_day_sk
+    rely:
+      at_most_one_match: true
   - name: dim_rider
     source: main.nyctaxi_gold.dim_rider
     on: source.rider_sk = dim_rider.rider_sk
+    rely:
+      at_most_one_match: true
 
 dimensions:
   # --- date hierarchy: year > month > date, plus day-of-week rollup ---

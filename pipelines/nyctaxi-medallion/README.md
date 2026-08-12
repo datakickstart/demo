@@ -56,6 +56,14 @@ GROUP BY month, time_of_day, time_of_day_order
 ORDER BY month, time_of_day_order;
 ```
 
+All five joins declare `rely: {at_most_one_match: true}` — every dimension surrogate
+key is verified unique, so the hint is truthful, but it is *unenforced*: a duplicate SK
+would silently corrupt results. Measured on serverless warehouse `datakickstart_xs`, the
+query above runs in **~1.05–1.13 s end-to-end**, of which execution is **~0.46–0.48 s**
+and the rest is metric-view query compilation. `EXPLAIN` shows only the two dimensions
+actually grouped by (`dim_date`, `dim_time_of_day`) in the plan, both as Photon broadcast
+joins; the other three are pruned. Full numbers are in the SQL file's header.
+
 ## Determinism
 
 Every surrogate key and every synthetic value is a pure function of a natural key:
