@@ -1,0 +1,35 @@
+bundle:
+  name: nyctaxi_medallion
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Target Unity Catalog for all three medallion schemas.
+    default: main
+  bronze_schema:
+    description: Bronze (raw ingest) schema.
+    default: nyctaxi_bronze
+  silver_schema:
+    description: Silver (cleaned + enriched) schema.
+    default: nyctaxi_silver
+  gold_schema:
+    description: Gold (star schema) schema.
+    default: nyctaxi_gold
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-7923129632668114.14.azuredatabricks.net
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-7923129632668114.14.azuredatabricks.net
+      root_path: /Workspace/Users/training@dustinvannoy.com/.bundle/${bundle.name}/${bundle.target}
+    permissions:
+      - user_name: training@dustinvannoy.com
+        level: CAN_MANAGE

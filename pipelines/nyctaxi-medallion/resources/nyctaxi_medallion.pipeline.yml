@@ -1,0 +1,22 @@
+resources:
+  pipelines:
+    nyctaxi_medallion_etl:
+      name: nyctaxi_medallion_etl
+      # Serverless pipeline compute — no clusters / instance sizing in this spec.
+      serverless: true
+      continuous: false
+      # Default publishing target. Datasets that belong in silver/gold use
+      # fully-qualified names (catalog.schema.table) to publish across schemas.
+      catalog: ${var.catalog}
+      schema: ${var.bronze_schema}
+      root_path: ../src
+      libraries:
+        - glob:
+            include: ../src/transformations/**
+      configuration:
+        catalog: ${var.catalog}
+        bronze_schema: ${var.bronze_schema}
+        silver_schema: ${var.silver_schema}
+        gold_schema: ${var.gold_schema}
+        source_table: samples.nyctaxi.trips
+        rider_count: "500"
